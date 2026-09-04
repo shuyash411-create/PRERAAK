@@ -1,0 +1,77 @@
+@import "tailwindcss";
+
+/*
+ * PRERAAK People OS.
+ *
+ * Forest green on cream, restrained. No gradients, no decorative animation.
+ * The palette is fixed rather than following the system's dark preference:
+ * this is one small internal tool with one look, and a second theme is a
+ * second set of contrast decisions to get wrong.
+ */
+@theme {
+  --color-forest-50: #f1f6f2;
+  --color-forest-100: #dcebe0;
+  --color-forest-200: #b9d7c2;
+  --color-forest-300: #8dbb9c;
+  --color-forest-400: #5c9873;
+  --color-forest-500: #3d7a56;
+  --color-forest-600: #2c6b4a;
+  --color-forest-700: #1f4d36;
+  --color-forest-800: #183c2b;
+  --color-forest-900: #123023;
+
+  --color-cream-50: #fdfcf8;
+  --color-cream-100: #faf7f0;
+  --color-cream-200: #f2ede1;
+  --color-cream-300: #e6dfcd;
+
+  --color-ink-900: #1b1b18;
+  --color-ink-700: #3f3f39;
+  --color-ink-500: #6b6b62;
+  --color-ink-400: #8c8c82;
+
+  --color-clay-600: #9a4a2f;
+  --color-clay-100: #f7e8e1;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+html {
+  background-color: var(--color-cream-100);
+}
+
+body {
+  background-color: var(--color-cream-100);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Every interactive element keeps a visible focus ring. */
+:focus-visible {
+  outline: 2px solid var(--color-forest-600);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+/*
+ * 16px minimum on form controls: anything smaller makes iOS Safari zoom on
+ * focus, which costs a tap to undo on the one screen that has a time budget.
+ */
+input,
+textarea,
+select,
+button {
+  font-size: 1rem;
+  font-family: inherit;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
