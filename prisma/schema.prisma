@@ -1,0 +1,270 @@
+// PRERAAK People OS — Stage 1 schema.
+//
+// Three invariants shape this file and must survive every future change:
+//   1. One person, one permanent identity. A Person row is never deleted and
+//      its personId is never reused. Relationships with PRERAAK are a stack of
+//      Engagement rows on top of that one Person.
+//   2. Contribution over attendance. Nothing here records clock-in, clock-out,
+//      session duration, login frequency, or time-of-day behaviour.
+//   3. Immutability. Submitted work is read-only. Corrections are new rows.
+//      TimelineEvent is append-only and enforced as such by a database trigger.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum PersonStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+}
+
+enum EngagementType {
+  INTERNSHIP
+  EMPLOYMENT
+}
+
+enum EngagementStatus {
+  UPCOMING
+  ACTIVE
+  COMPLETED
+  TERMINATED
+}
+
+enum WorkMode {
+  ONSITE
+  REMOTE
+  HYBRID
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+}
+
+enum CorrectionTarget {
+  WORK_LOG
+  WEEKLY_REPORT
+}
+
+enum CorrectionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DocumentVisibility {
+  ADMIN_ONLY
+  PERSON_VISIBLE
+}
+
+/// A human being. Created once, never deleted. `status` moves to ARCHIVED
+/// instead. Only the fields in section 6 of the brief are collected: no
+/// Aadhaar, PAN, bank, address, date of birth, gender, salary or emergency
+/// contact. Every extra sensitive field is a DPDP Act obligation for no
+/// operational benefit at this headcount.
+model Person {
+  id              String       @id @default(cuid())
+  /// Permanent public identity, PRR-000001. Allocated once, never reused.
+  personId        String       @unique @map("person_id")
+  fullName        String       @map("full_name")
+  preferredName   String?      @map("preferred_name")
+  email           String       @unique
+  phone           String?
+  college         String?
+  course          String?
+  graduationYear  Int?         @map("graduation_year")
+  status          PersonStatus @default(ACTIVE)
+  isAdmin         Boolean      @default(false) @map("is_admin")
+  /// Auth.js metadata, not personal data.
+  emailVerifiedAt DateTime?    @map("email_verified_at")
+  /// Future hook. Deliberately unused and unexposed in Stage 1.
+  organizationId  String?      @map("organization_id")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  archivedAt      DateTime?    @map("archived_at")
+
+  engagements        Engagement[]        @relation("PersonEngagements")
+  mentoring          Engagement[]        @relation("EngagementMentor")
+  workLogs           WorkLog[]           @relation("WorkLogAuthor")
+  reviewedWorkLogs   WorkLog[]           @relation("WorkLogReviewer")
+  weeklyReports      WeeklyReport[]      @relation("WeeklyReportAuthor")
+  reviewedWeeklies   WeeklyReport[]      @relation("WeeklyReportReviewer")
+  correctionsAsked   CorrectionRequest[] @relation("CorrectionRequester")
+  correctionsDecided CorrectionRequest[] @relation("CorrectionDecider")
+  documents          Document[]          @relation("DocumentSubject")
+  documentsUploaded  Document[]          @relation("DocumentUploader")
+  timeline           TimelineEvent[]     @relation("TimelineSubject")
+  timelineActed      TimelineEvent[]     @relation("TimelineActor")
+
+  @@index([personId])
+  @@index([email])
+  @@index([status])
+  @@map("people")
+}
+
+/// One period of relationship with PRERAAK. An intern becoming an employee
+/// closes the internship row and opens an employment row against the SAME
+/// Person. Engagements are never overwritten and never deleted.
+model Engagement {
+  id             String           @id @default(cuid())
+  personId       String           @map("person_id")
+  person         Person           @relation("PersonEngagements", fields: [personId], references: [id])
+  type           EngagementType
+  designation    String
+  department     String?
+  mentorId       String?          @map("mentor_id")
+  mentor         Person?          @relation("EngagementMentor", fields: [mentorId], references: [id])
+  startDate      DateTime         @map("start_date") @db.Date
+  endDate        DateTime?        @map("end_date") @db.Date
+  status         EngagementStatus @default(UPCOMING)
+  workMode       WorkMode?        @map("work_mode")
+  organizationId String?          @map("organization_id")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  workLogs      WorkLog[]
+  weeklyReports WeeklyReport[]
+
+  @@index([personId])
+  @@index([mentorId])
+  @@index([status])
+  @@map("engagements")
+}
+
+/// A day of contribution. `workDate` is an IST calendar date — a log submitted
+/// at 01:30 IST belongs to that IST date, not the previous UTC one. Once
+/// `status` is SUBMITTED the content fields are read-only forever; changes go
+/// through CorrectionRequest.
+model WorkLog {
+  id            String           @id @default(cuid())
+  personId      String           @map("person_id")
+  person        Person           @relation("WorkLogAuthor", fields: [personId], references: [id])
+  engagementId  String           @map("engagement_id")
+  engagement    Engagement       @relation(fields: [engagementId], references: [id])
+  workDate      DateTime         @map("work_date") @db.Date
+  summary       String
+  workCompleted String?          @map("work_completed")
+  blockers      String?
+  nextStep      String?          @map("next_step")
+  links         String[]         @default([])
+  status        SubmissionStatus @default(DRAFT)
+  submittedAt   DateTime?        @map("submitted_at")
+  reviewedById  String?          @map("reviewed_by")
+  reviewedBy    Person?          @relation("WorkLogReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?        @map("reviewed_at")
+  mentorComment String?          @map("mentor_comment")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  @@unique([personId, workDate])
+  @@index([personId])
+  @@index([workDate])
+  @@index([personId, status])
+  @@map("work_logs")
+}
+
+/// A week of contribution. `weekStart` is the Monday of the IST week.
+model WeeklyReport {
+  id            String           @id @default(cuid())
+  personId      String           @map("person_id")
+  person        Person           @relation("WeeklyReportAuthor", fields: [personId], references: [id])
+  engagementId  String           @map("engagement_id")
+  engagement    Engagement       @relation(fields: [engagementId], references: [id])
+  weekStart     DateTime         @map("week_start") @db.Date
+  weekEnd       DateTime         @map("week_end") @db.Date
+  workCompleted String           @map("work_completed")
+  deliverables  String?
+  challenges    String?
+  learning      String?
+  nextWeekPlan  String?          @map("next_week_plan")
+  status        SubmissionStatus @default(DRAFT)
+  submittedAt   DateTime?        @map("submitted_at")
+  reviewedById  String?          @map("reviewed_by")
+  reviewedBy    Person?          @relation("WeeklyReportReviewer", fields: [reviewedById], references: [id])
+  reviewedAt    DateTime?        @map("reviewed_at")
+  mentorComment String?          @map("mentor_comment")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  @@unique([personId, weekStart])
+  @@index([personId])
+  @@map("weekly_reports")
+}
+
+/// The only way a submitted record changes. On approval the target's current
+/// values are snapshotted into `previousValue` before `proposedValue` is
+/// applied, so no version is ever lost.
+model CorrectionRequest {
+  id            String           @id @default(cuid())
+  targetType    CorrectionTarget @map("target_type")
+  targetId      String           @map("target_id")
+  requestedById String           @map("requested_by")
+  requestedBy   Person           @relation("CorrectionRequester", fields: [requestedById], references: [id])
+  reason        String
+  proposedValue Json             @map("proposed_value")
+  previousValue Json?            @map("previous_value")
+  status        CorrectionStatus @default(PENDING)
+  decidedById   String?          @map("decided_by")
+  decidedBy     Person?          @relation("CorrectionDecider", fields: [decidedById], references: [id])
+  decidedAt     DateTime?        @map("decided_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+
+  @@index([targetType, targetId])
+  @@index([status])
+  @@map("correction_requests")
+}
+
+/// Metadata only. The object itself lives in the bucket, never in Postgres,
+/// and is served through short-lived signed URLs. Stage 1 builds the read path
+/// only; upload and generation are Stage 3.
+model Document {
+  id             String             @id @default(cuid())
+  personId       String             @map("person_id")
+  person         Person             @relation("DocumentSubject", fields: [personId], references: [id])
+  category       String
+  title          String
+  storageKey     String             @map("storage_key")
+  mimeType       String             @map("mime_type")
+  sizeBytes      Int                @map("size_bytes")
+  visibility     DocumentVisibility @default(ADMIN_ONLY)
+  uploadedById   String             @map("uploaded_by")
+  uploadedBy     Person             @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  uploadedAt     DateTime           @default(now()) @map("uploaded_at")
+  version        Int                @default(1)
+  organizationId String?            @map("organization_id")
+
+  @@index([personId])
+  @@map("documents")
+}
+
+/// APPEND ONLY. There is no UPDATE and no DELETE path to this table anywhere
+/// in the codebase, and a database trigger rejects both regardless.
+model TimelineEvent {
+  id          String   @id @default(cuid())
+  personId    String   @map("person_id")
+  person      Person   @relation("TimelineSubject", fields: [personId], references: [id])
+  eventType   String   @map("event_type")
+  description String
+  actorId     String?  @map("actor_id")
+  actor       Person?  @relation("TimelineActor", fields: [actorId], references: [id])
+  metadata    Json?
+  occurredAt  DateTime @default(now()) @map("occurred_at")
+
+  @@index([personId, occurredAt])
+  @@map("timeline_events")
+}
+
+/// Auth.js magic-link tokens. Sessions are JWTs, so no session table exists.
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
