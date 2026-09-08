@@ -1,4 +1,5 @@
 import { Resend } from "resend";
+import { rememberDevSignInLink } from "@/lib/dev-signin-link";
 
 /**
  * Outbound email.
@@ -17,6 +18,9 @@ export async function sendSignInLink(to: string, url: string): Promise<void> {
       throw new Error("RESEND_API_KEY and EMAIL_FROM are required in production.");
     }
     console.info(`\n[dev] Sign-in link for ${to}:\n${url}\n`);
+    // Also held in memory so the check-email page can show it in a hosted
+    // preview, where there is no console to read. Gated inside that module.
+    rememberDevSignInLink(to, url);
     return;
   }
 

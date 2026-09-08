@@ -63,7 +63,31 @@ npm run dev
 
 Sign in at `http://localhost:3000/login` as `aditi@dev.local` (admin),
 `rohan@dev.local` (mentor) or `meera@dev.local` (intern). With no Resend key
-the magic link appears in the terminal running `npm run dev`.
+the magic link is printed to the terminal running `npm run dev` **and** shown
+on the "check your email" page, so a hosted preview with no console is still
+usable.
+
+That panel is not a way around authentication — the link is the same
+single-use, expiring token Auth.js would have emailed, issued only for an
+address that already belongs to a person. It is gated on `NODE_ENV` not being
+production **and** `RESEND_API_KEY` being empty, checked both when the link is
+stored and when it is read, and `tests/dev-signin-link.test.ts` proves the gate
+closes. A correctly configured deployment fails both conditions.
+
+## Claude Code on the web
+
+`.claude/preview.json` runs `npm run dev` on port 3000, and
+`.claude/hooks/session-start.sh` prepares the container first: dependencies,
+Prisma client, PostgreSQL, role and databases, migrations, a development
+`.env.local`, and seed data.
+
+The seeding is load-bearing rather than convenient. PRERAAK is invite-only by
+construction, so an empty database is a locked door with nobody inside and the
+preview would have no way in at all.
+
+The hook is idempotent, non-interactive, never overwrites an existing
+`.env.local`, and exits immediately outside a remote container so local
+machines keep their own database and credentials.
 
 ## Tests
 
