@@ -41,24 +41,22 @@ Auth.js v5 magic link · Resend · Vitest. Everything runs on free tiers.
 Requires Node 22+ and PostgreSQL 16.
 
 ```bash
-# 1. Database
-sudo -u postgres psql -c "CREATE ROLE preraak LOGIN PASSWORD 'preraak' CREATEDB;"
-sudo -u postgres createdb -O preraak preraak_dev
-sudo -u postgres createdb -O preraak preraak_test
+npm run setup   # everything below, in one command
+npm run dev     # http://localhost:3000
+```
 
-# 2. Environment
-cp .env.example .env.local
-#    Set DATABASE_URL to postgresql://preraak:preraak@127.0.0.1:5432/preraak_dev
-#    Generate AUTH_SECRET with: npx auth secret
-#    Leave RESEND_API_KEY empty — sign-in links print to the server console.
+`npm run setup` installs dependencies, generates the Prisma client, starts
+PostgreSQL (Homebrew on macOS, `pg_ctlcluster` on Debian, or whatever is
+already running), creates the role and both databases, applies migrations,
+writes a development `.env.local` with a generated `AUTH_SECRET`, and seeds
+three accounts. It is idempotent, never overwrites an existing `.env.local`,
+and prints what to do next if PostgreSQL is not installed.
 
-npm install
-npm run db:migrate
+Prefer to do it by hand, or already have a database elsewhere? Put its
+connection string in `.env.local` as `DATABASE_URL`, then:
 
-# 3. Development data (refuses to run against anything non-local)
-SEED_CONFIRM=DEV npm run seed
-
-npm run dev
+```bash
+npm install && npx prisma migrate deploy && SEED_CONFIRM=DEV npm run seed
 ```
 
 Sign in at `http://localhost:3000/login` as `aditi@dev.local` (admin),
@@ -86,26 +84,29 @@ Starting the server locally still needs a database and a `.env.local`; follow
 [Local setup](#local-setup) first, or the preview will boot and then error on
 every page.
 
-`.claude/hooks/session-start.sh` covers the same ground automatically for cloud
-sessions: dependencies, Prisma client, PostgreSQL, role and databases,
-migrations, a development `.env.local`, and seed data.
+`.claude/hooks/session-start.sh` runs that same `npm run setup` script
+automatically in cloud sessions. One implementation, two entry points, so a
+container and a laptop cannot drift apart. The hook exits immediately outside
+a cloud container, so your local machine is never reconfigured behind your
+back.
 
 The seeding is load-bearing rather than convenient. PRERAAK is invite-only by
 construction, so an empty database is a locked door with nobody inside and the
 preview would have no way in at all.
 
-The hook is idempotent, non-interactive, never overwrites an existing
-`.env.local`, and exits immediately outside a remote container so local
-machines keep their own database and credentials.
-
 ## Tests
 
 ```bash
-npm run test:db     # apply migrations to preraak_test
-npm test            # 75 tests
+npm test            # 83 tests
 npm run typecheck
 npm run lint
 ```
+
+`npm run setup` prepares the test database too. The suite truncates every
+table, so `tests/setup.ts` loads `.env.test` with `override: true` — an
+ambient `DATABASE_URL` from your shell must never decide which database gets
+emptied — and then refuses outright unless the target is local and its name
+ends in `_test`.
 
 The suite invokes the **real exported route handlers** against a **real
 Postgres** — no mocked database, no simulated authorization. The 12 scenarios
