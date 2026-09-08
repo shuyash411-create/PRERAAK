@@ -74,12 +74,21 @@ production **and** `RESEND_API_KEY` being empty, checked both when the link is
 stored and when it is read, and `tests/dev-signin-link.test.ts` proves the gate
 closes. A correctly configured deployment fails both conditions.
 
-## Claude Code on the web
+## Claude Code
 
-`.claude/preview.json` runs `npm run dev` on port 3000, and
-`.claude/hooks/session-start.sh` prepares the container first: dependencies,
-Prisma client, PostgreSQL, role and databases, migrations, a development
-`.env.local`, and seed data.
+`.claude/launch.json` tells the Claude Code **Desktop** app how to start this
+project: `npm run dev` on port 3000. Open the repo in the Desktop app's Code
+tab and the Browser pane (Cmd+Shift+B / Ctrl+Shift+B, or the Views menu) runs
+and displays it. Preview is a Desktop feature — cloud sessions on the web have
+no Browser pane.
+
+Starting the server locally still needs a database and a `.env.local`; follow
+[Local setup](#local-setup) first, or the preview will boot and then error on
+every page.
+
+`.claude/hooks/session-start.sh` covers the same ground automatically for cloud
+sessions: dependencies, Prisma client, PostgreSQL, role and databases,
+migrations, a development `.env.local`, and seed data.
 
 The seeding is load-bearing rather than convenient. PRERAAK is invite-only by
 construction, so an empty database is a locked door with nobody inside and the
