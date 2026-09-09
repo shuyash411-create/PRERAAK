@@ -14,8 +14,16 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // Neon's pooled connection (PgBouncer) — used by the running app. A
+  // serverless function opens a new connection per invocation; without
+  // pooling that exhausts Neon's connection limit fast.
+  url       = env("DATABASE_URL")
+  // Neon's direct connection — used only by `prisma migrate deploy`. DDL and
+  // the advisory locks migrations take don't work reliably through
+  // transaction pooling. Locally both point at the same non-pooled Postgres,
+  // so nothing here changes for `npm run setup`.
+  directUrl = env("DIRECT_URL")
 }
 
 enum PersonStatus {

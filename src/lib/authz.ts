@@ -100,6 +100,7 @@ const DENIAL_MESSAGES: Record<string, string> = {
   draft_records_are_edited_directly: "This is still a draft — edit it directly instead.",
   timeline_is_append_only: "History cannot be changed.",
   not_available_in_stage_1: "That is not available yet.",
+  cannot_review_a_draft: "There is nothing to review until this is submitted.",
   uploads_are_stage_3: "Document uploads are not available yet.",
   field_not_writable: "Those fields cannot be changed here.",
 };
@@ -158,6 +159,14 @@ export const PERSON_SELF_FIELDS = [
 
 /** What an assignee may write on their own task submission, before submitting. */
 export const TASK_SUBMISSION_FIELDS = ["submissionNote", "links"] as const;
+
+/**
+ * What a mentor or admin may write when reviewing somebody else's submitted
+ * work. Deliberately just the comment: `reviewedById` and `reviewedAt` are set
+ * by the server from the actor and the clock, never from a request body, the
+ * same way `submittedAt` is on submission.
+ */
+export const REVIEW_FIELDS = ["mentorComment"] as const;
 
 export const TEAM_ADMIN_FIELDS = ["name", "leadId", "isActive"] as const;
 
@@ -339,8 +348,20 @@ export async function authorize(
         return { scope, subjectId: log.personId, writableFields: WORK_LOG_DRAFT_FIELDS };
       }
 
-      // Mentor review is Stage 2. The scope exists and is tested; the writable
-      // field it will unlock (mentorComment) is not granted yet.
+      // A mentor or admin may leave a comment once the log is submitted —
+      // never on their own work, and never on a draft that hasn't been
+      // finished. Review is repeatable rather than write-once: nothing calls
+      // it an irreversible act the way submission is, and there is no
+      // correction path for mentorComment, so freezing it after one write
+      // would make a typo permanent. Each write, first or revised, is its own
+      // timeline entry, so the history of what was said is never lost even
+      // though the live field can change.
+      if (action === "review") {
+        if (scope === "SELF") throw forbidden("not_the_author");
+        if (log.status !== "SUBMITTED") throw forbidden("cannot_review_a_draft");
+        return { scope, subjectId: log.personId, writableFields: REVIEW_FIELDS };
+      }
+
       throw forbidden("not_available_in_stage_1");
     }
 
@@ -360,6 +381,12 @@ export async function authorize(
         if (scope !== "SELF") throw forbidden("not_the_author");
         if (report.status === "SUBMITTED") throw forbidden("submitted_records_are_immutable");
         return { scope, subjectId: report.personId, writableFields: WEEKLY_REPORT_DRAFT_FIELDS };
+      }
+
+      if (action === "review") {
+        if (scope === "SELF") throw forbidden("not_the_author");
+        if (report.status !== "SUBMITTED") throw forbidden("cannot_review_a_draft");
+        return { scope, subjectId: report.personId, writableFields: REVIEW_FIELDS };
       }
 
       throw forbidden("not_available_in_stage_1");
@@ -461,6 +488,12 @@ export async function authorize(
           subjectId: assignment.personId,
           writableFields: TASK_SUBMISSION_FIELDS,
         };
+      }
+
+      if (action === "review") {
+        if (scope === "SELF") throw forbidden("not_the_author");
+        if (assignment.status !== "SUBMITTED") throw forbidden("cannot_review_a_draft");
+        return { scope, subjectId: assignment.personId, writableFields: REVIEW_FIELDS };
       }
 
       throw forbidden("not_available_in_stage_1");

@@ -134,10 +134,14 @@ async function main(): Promise<void> {
     },
   });
 
-  for (const [offset, summary] of [
-    [-3, "[DEV] Set up the local environment and read the codebase."],
-    [-2, "[DEV] Wrote the first migration and got it reviewed."],
-    [-1, "[DEV] Fixed the timezone handling on the reports screen."],
+  for (const [offset, summary, review] of [
+    [
+      -3,
+      "[DEV] Set up the local environment and read the codebase.",
+      "[DEV] Good first few days — nice pace.",
+    ],
+    [-2, "[DEV] Wrote the first migration and got it reviewed.", null],
+    [-1, "[DEV] Fixed the timezone handling on the reports screen.", null],
   ] as const) {
     await db.workLog.create({
       data: {
@@ -147,6 +151,9 @@ async function main(): Promise<void> {
         summary,
         status: "SUBMITTED",
         submittedAt: new Date(),
+        mentorComment: review,
+        reviewedById: review ? mentor.id : null,
+        reviewedAt: review ? new Date() : null,
       },
     });
   }

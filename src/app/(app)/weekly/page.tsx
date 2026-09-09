@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { currentActor } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -77,14 +78,19 @@ export default async function WeeklyPage() {
         ) : (
           <ul className="divide-y divide-cream-300 rounded-lg border border-cream-300 bg-cream-50">
             {earlier.map((report) => (
-              <li key={report.id} className="flex items-start justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-ink-900">
-                    Week of {formatIstDate(utcMidnightToIstDate(report.weekStart))}
-                  </p>
-                  <p className="mt-0.5 truncate text-sm text-ink-500">{report.workCompleted}</p>
-                </div>
-                <StatusPill status={report.status} />
+              <li key={report.id}>
+                <Link
+                  href={`/weekly/${report.id}`}
+                  className="flex items-start justify-between gap-3 px-4 py-3 hover:bg-cream-100"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-ink-900">
+                      Week of {formatIstDate(utcMidnightToIstDate(report.weekStart))}
+                    </p>
+                    <p className="mt-0.5 truncate text-sm text-ink-500">{report.workCompleted}</p>
+                  </div>
+                  <StatusPill status={report.status} />
+                </Link>
               </li>
             ))}
           </ul>

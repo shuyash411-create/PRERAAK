@@ -75,6 +75,7 @@ export default async function AdminPeoplePage({
         subtitle={`${total} ${total === 1 ? "person" : "people"}`}
         action={
           <div className="flex flex-wrap gap-2">
+            <Link href="/admin/capacity" className={secondaryButtonClass}>Capacity</Link>
             <Link href="/admin/onboarding" className={secondaryButtonClass}>Onboarding</Link>
             <Link href="/admin/tasks" className={secondaryButtonClass}>Tasks</Link>
             <Link href="/admin/export" className={secondaryButtonClass}>Export</Link>

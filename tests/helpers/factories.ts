@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { allocatePersonId } from "@/lib/person-id";
-import { istDateToUtcMidnight, istDateString } from "@/lib/ist";
-import type { Person, Engagement, WorkLog, Team, Task, TaskAssignment } from "@prisma/client";
+import { addIstDays, istDateToUtcMidnight, istDateString, istWeekBounds } from "@/lib/ist";
+import type { Person, Engagement, WorkLog, WeeklyReport, Team, Task, TaskAssignment } from "@prisma/client";
 
 let counter = 0;
 const uniqueEmail = (label: string) => `${label}-${++counter}-${Date.now()}@example.test`;
@@ -45,7 +45,14 @@ export async function makeEngagement(
 export async function makeWorkLog(
   personId: string,
   engagementId: string,
-  overrides: Partial<{ workDate: string; summary: string; status: "DRAFT" | "SUBMITTED" }> = {},
+  overrides: Partial<{
+    workDate: string;
+    summary: string;
+    status: "DRAFT" | "SUBMITTED";
+    mentorComment: string | null;
+    reviewedById: string | null;
+    reviewedAt: Date | null;
+  }> = {},
 ): Promise<WorkLog> {
   const status = overrides.status ?? "DRAFT";
   return db.workLog.create({
@@ -56,6 +63,40 @@ export async function makeWorkLog(
       summary: overrides.summary ?? "Worked on the thing.",
       status,
       submittedAt: status === "SUBMITTED" ? new Date() : null,
+      mentorComment: overrides.mentorComment ?? null,
+      reviewedById: overrides.reviewedById ?? null,
+      reviewedAt: overrides.reviewedAt ?? null,
+    },
+  });
+}
+
+/** A weekly report. Mirrors `makeWorkLog`'s shape. */
+export async function makeWeeklyReport(
+  personId: string,
+  engagementId: string,
+  overrides: Partial<{
+    weekStart: string;
+    workCompleted: string;
+    status: "DRAFT" | "SUBMITTED";
+    mentorComment: string | null;
+    reviewedById: string | null;
+    reviewedAt: Date | null;
+  }> = {},
+): Promise<WeeklyReport> {
+  const status = overrides.status ?? "DRAFT";
+  const weekStart = overrides.weekStart ?? istWeekBounds().weekStart;
+  return db.weeklyReport.create({
+    data: {
+      personId,
+      engagementId,
+      weekStart: istDateToUtcMidnight(weekStart),
+      weekEnd: istDateToUtcMidnight(addIstDays(weekStart, 6)),
+      workCompleted: overrides.workCompleted ?? "Worked on the thing this week.",
+      status,
+      submittedAt: status === "SUBMITTED" ? new Date() : null,
+      mentorComment: overrides.mentorComment ?? null,
+      reviewedById: overrides.reviewedById ?? null,
+      reviewedAt: overrides.reviewedAt ?? null,
     },
   });
 }
@@ -93,7 +134,13 @@ export async function assign(
   taskId: string,
   personId: string,
   assignedById: string,
-  overrides: Partial<{ status: "ASSIGNED" | "IN_PROGRESS" | "SUBMITTED"; submissionNote: string }> = {},
+  overrides: Partial<{
+    status: "ASSIGNED" | "IN_PROGRESS" | "SUBMITTED";
+    submissionNote: string;
+    mentorComment: string | null;
+    reviewedById: string | null;
+    reviewedAt: Date | null;
+  }> = {},
 ): Promise<TaskAssignment> {
   const status = overrides.status ?? "ASSIGNED";
   return db.taskAssignment.create({
@@ -104,6 +151,9 @@ export async function assign(
       status,
       submissionNote: overrides.submissionNote ?? (status === "SUBMITTED" ? "Handed in." : null),
       submittedAt: status === "SUBMITTED" ? new Date() : null,
+      mentorComment: overrides.mentorComment ?? null,
+      reviewedById: overrides.reviewedById ?? null,
+      reviewedAt: overrides.reviewedAt ?? null,
     },
   });
 }

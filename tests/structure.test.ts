@@ -18,7 +18,20 @@ import { isGuarded } from "@/lib/guarded";
 
 const API_ROOT = join(process.cwd(), "src", "app", "api");
 const SRC_ROOT = join(process.cwd(), "src");
-const AUTH_ROUTE = join("auth", "[...nextauth]");
+
+/**
+ * Routes with no `Actor` to authorize, so they cannot come from `guarded()`
+ * and are exempt from every test in this file that assumes one:
+ *
+ *   - Auth.js's own handler — the one entry point a stranger reaches before
+ *     signing in.
+ *   - The cron routes — called by Vercel's scheduler with no session at all,
+ *     authenticated by a shared secret instead. See `src/lib/cron-auth.ts`
+ *     and the hand-written 401/200 tests for them below, which give these
+ *     routes the same coverage `guarded()`'s structural test gives everyone
+ *     else, just written out explicitly.
+ */
+const PUBLIC_ROUTES = [join("auth", "[...nextauth]"), join("cron")];
 
 const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const;
 
@@ -33,8 +46,11 @@ function walk(dir: string, match: (file: string) => boolean): string[] {
 }
 
 const routeFiles = walk(API_ROOT, (f) => f.endsWith(`${sep}route.ts`));
-/** Every route except the Auth.js handler, which is the one public entry point. */
-const guardedRouteFiles = routeFiles.filter((f) => !f.includes(AUTH_ROUTE));
+/** Every route except the public ones above. */
+const guardedRouteFiles = routeFiles.filter(
+  (f) => !PUBLIC_ROUTES.some((publicRoute) => f.includes(publicRoute)),
+);
+const exemptRouteFiles = routeFiles.filter((f) => !guardedRouteFiles.includes(f));
 
 beforeEach(async () => {
   await resetDatabase();
@@ -47,7 +63,10 @@ afterAll(async () => {
 describe("route inventory", () => {
   it("finds the routes it is supposed to be checking", () => {
     expect(routeFiles.length).toBeGreaterThan(10);
-    expect(guardedRouteFiles.length).toBe(routeFiles.length - 1);
+    // 1 auth handler + 2 cron routes today. A new exemption changing this
+    // count is a deliberate edit here, not a silent gap in coverage.
+    expect(exemptRouteFiles.length).toBe(3);
+    expect(guardedRouteFiles.length).toBe(routeFiles.length - exemptRouteFiles.length);
   });
 });
 

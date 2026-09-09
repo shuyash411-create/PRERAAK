@@ -4,6 +4,7 @@ import { authorize, AuthzError } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { formatIstDate, utcMidnightToIstDate } from "@/lib/ist";
 import { BackLink, Card, StatusPill } from "@/components/ui";
+import { ReviewForm } from "@/components/review-form";
 import { CorrectionForm } from "./correction-form";
 
 export default async function WorkLogPage({ params }: { params: Promise<{ id: string }> }) {
@@ -12,9 +13,12 @@ export default async function WorkLogPage({ params }: { params: Promise<{ id: st
   if (!actor) redirect("/login");
 
   // Same check as the API route: the page is not the enforcement point, but it
-  // must not render what the route would refuse either.
+  // must not render what the route would refuse either. The returned grant's
+  // scope (SELF vs MENTOR/ADMIN) also decides which action — correction or
+  // review — this page offers below, without a second authorize() call.
+  let scope: "SELF" | "MENTOR" | "ADMIN";
   try {
-    await authorize(actor, "read", { kind: "work_log", id });
+    ({ scope } = await authorize(actor, "read", { kind: "work_log", id }));
   } catch (error) {
     if (error instanceof AuthzError) notFound();
     throw error;
@@ -26,7 +30,7 @@ export default async function WorkLogPage({ params }: { params: Promise<{ id: st
   });
   if (!log) notFound();
 
-  const isOwner = log.personId === actor.id;
+  const isOwner = scope === "SELF";
   const pendingCorrection = await prisma.correctionRequest.findFirst({
     where: { targetType: "WORK_LOG", targetId: id, status: "PENDING" },
   });
@@ -75,7 +79,14 @@ export default async function WorkLogPage({ params }: { params: Promise<{ id: st
         ) : null}
       </Card>
 
-      {log.mentorComment ? (
+      {!isOwner && log.status === "SUBMITTED" ? (
+        <ReviewForm
+          targetType="WORK_LOG"
+          targetId={log.id}
+          revalidateTarget={`/my-work/${log.id}`}
+          existingComment={log.mentorComment}
+        />
+      ) : log.mentorComment ? (
         <Card>
           <p className="text-xs font-medium uppercase tracking-wide text-ink-400">Mentor comment</p>
           <p className="mt-1 whitespace-pre-wrap text-sm text-ink-900">{log.mentorComment}</p>

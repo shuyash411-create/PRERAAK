@@ -5,12 +5,12 @@ people today, ~20 within a year, never more than 50.
 
 **Built:** permanent identities and engagement stacks, immutable work logs and
 weekly reports, corrections, an append-only timeline, magic-link auth, admin
-people management — plus teams, tasks with deadlines, self-service onboarding
-and CSV exports.
+people management — plus teams, tasks with deadlines, self-service onboarding,
+CSV exports, mentor review of submitted work, an admin capacity view, and a
+weekly founder digest with a Friday reminder email.
 
-**Not built:** mentor review UI, the weekly founder digest, Friday reminders,
-leave requests, and everything to do with documents (uploads, PDFs, letters,
-certificates).
+**Not built:** leave requests, and everything to do with documents (uploads,
+PDFs, letters, certificates).
 
 Tasks and CSV exports were on the original brief's do-not-build list. They were
 added later at the founder's explicit request, and built deliberately small —
@@ -81,6 +81,12 @@ address that already belongs to a person. It is gated on `NODE_ENV` not being
 production **and** `RESEND_API_KEY` being empty, checked both when the link is
 stored and when it is read, and `tests/dev-signin-link.test.ts` proves the gate
 closes. A correctly configured deployment fails both conditions.
+
+## Deploy
+
+Runs on Vercel with a Neon Postgres database, both free-tier. See
+[`DEPLOY.md`](./DEPLOY.md) for the full runbook, including how to create the
+first admin on a database that otherwise has nobody in it.
 
 ## Claude Code
 
@@ -194,7 +200,7 @@ boolean plus a mentor lookup is the correct engineering choice.
 | Scope | Who | What |
 |---|---|---|
 | `SELF` | the person | read own records; write them while `DRAFT` |
-| `MENTOR` | `engagement.mentor_id` | read their mentees' records (read-only in Stage 1) |
+| `MENTOR` | `engagement.mentor_id` | read their mentees' records; leave a review comment on submitted work |
 | `ADMIN` | `people.is_admin` | full read and write |
 
 A grant names the exact fields it may write. Every `PATCH` intersects the body

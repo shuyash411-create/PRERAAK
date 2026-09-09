@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { formatIstDate, utcMidnightToIstDate } from "@/lib/ist";
 import { dueState } from "@/lib/task-progress";
 import { BackLink, Card, StatusPill } from "@/components/ui";
+import { ReviewForm } from "@/components/review-form";
 import { SubmissionForm } from "./submission-form";
 
 export default async function TaskPage({ params }: { params: Promise<{ id: string }> }) {
@@ -36,6 +37,23 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
   const dueDate = utcMidnightToIstDate(task.dueDate);
   const mine = task.assignments.find((a) => a.personId === actor.id) ?? null;
   const due = dueState(dueDate, mine?.status === "SUBMITTED");
+
+  // A task can carry several people's assignments. Which of the *others* this
+  // viewer may see the submission of, and comment on, is exactly the same
+  // check `authorize` makes on a single assignment — asked once per assignee
+  // rather than derived here, so it can never drift from the real rule.
+  const others = await Promise.all(
+    task.assignments
+      .filter((a) => a.personId !== actor.id)
+      .map(async (a) => {
+        try {
+          await authorize(actor, "review", { kind: "task_assignment", id: a.id });
+          return { assignment: a, canReview: true };
+        } catch {
+          return { assignment: a, canReview: false };
+        }
+      }),
+  );
 
   return (
     <div className="space-y-6">
@@ -88,18 +106,35 @@ export default async function TaskPage({ params }: { params: Promise<{ id: strin
         )
       ) : null}
 
-      {task.assignments.length > 1 ? (
+      {others
+        .filter((o) => o.canReview && o.assignment.status === "SUBMITTED")
+        .map(({ assignment: a }) => (
+          <div key={a.id} className="space-y-4">
+            <Card>
+              <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
+                {a.person.preferredName ?? a.person.fullName}&rsquo;s submission
+              </p>
+              <p className="mt-1 whitespace-pre-wrap text-ink-900">{a.submissionNote}</p>
+            </Card>
+            <ReviewForm
+              targetType="TASK_ASSIGNMENT"
+              targetId={a.id}
+              revalidateTarget={`/tasks/${task.id}`}
+              existingComment={a.mentorComment}
+            />
+          </div>
+        ))}
+
+      {others.length > 0 ? (
         <section>
           <h2 className="mb-2 text-sm font-medium text-ink-700">Also on this task</h2>
           <ul className="flex flex-wrap gap-2">
-            {task.assignments
-              .filter((a) => a.personId !== actor.id)
-              .map((a) => (
-                <li key={a.id} className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-sm text-ink-700">
-                  {a.person.preferredName ?? a.person.fullName}
-                  {a.status === "SUBMITTED" ? " · submitted" : ""}
-                </li>
-              ))}
+            {others.map(({ assignment: a }) => (
+              <li key={a.id} className="rounded-full border border-cream-300 bg-cream-50 px-3 py-1 text-sm text-ink-700">
+                {a.person.preferredName ?? a.person.fullName}
+                {a.status === "SUBMITTED" ? " · submitted" : ""}
+              </li>
+            ))}
           </ul>
         </section>
       ) : null}
