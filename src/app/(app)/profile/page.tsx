@@ -3,6 +3,7 @@ import { currentActor } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { formatIstDate, formatIstTimestamp, utcMidnightToIstDate } from "@/lib/ist";
 import { Card, EmptyState, StatusPill } from "@/components/ui";
+import { ProfileForm } from "./profile-form";
 
 /**
  * A person's own record: who they are, every engagement they have had, and
@@ -18,7 +19,10 @@ export default async function ProfilePage() {
     include: {
       engagements: {
         orderBy: { startDate: "desc" },
-        include: { mentor: { select: { fullName: true, preferredName: true } } },
+        include: {
+          mentor: { select: { fullName: true, preferredName: true } },
+          team: { select: { name: true } },
+        },
       },
       timeline: {
         orderBy: { occurredAt: "desc" },
@@ -49,6 +53,16 @@ export default async function ProfilePage() {
         <Detail label="Status" value={person.status} />
       </Card>
 
+      <ProfileForm
+        defaultValues={{
+          preferredName: person.preferredName ?? "",
+          phone: person.phone ?? "",
+          college: person.college ?? "",
+          course: person.course ?? "",
+          graduationYear: person.graduationYear ? String(person.graduationYear) : "",
+        }}
+      />
+
       <section>
         <h2 className="mb-3 text-lg font-semibold text-ink-900">Engagements</h2>
         <p className="mb-3 text-sm text-ink-500">
@@ -73,7 +87,7 @@ export default async function ProfilePage() {
                     <p className="font-medium text-ink-900">{engagement.designation}</p>
                     <p className="mt-0.5 text-sm text-ink-500">
                       {engagement.type === "INTERNSHIP" ? "Internship" : "Employment"}
-                      {engagement.department ? ` · ${engagement.department}` : ""}
+                      {engagement.team ? ` · ${engagement.team.name}` : ""}
                       {engagement.workMode ? ` · ${engagement.workMode.toLowerCase()}` : ""}
                     </p>
                   </div>

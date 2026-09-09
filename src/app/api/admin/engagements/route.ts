@@ -46,7 +46,7 @@ export const POST = guarded({ action: "create", resource: { kind: "admin" } }, a
         personId: input.personId,
         type: input.type,
         designation: input.designation,
-        department: input.department ?? null,
+        teamId: input.teamId ?? null,
         mentorId: input.mentorId ?? null,
         startDate: istDateToUtcMidnight(input.startDate),
         status,

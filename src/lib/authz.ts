@@ -1,4 +1,4 @@
-import type { PersonStatus } from "@prisma/client";
+import type { CorrectionTarget, PersonStatus } from "@prisma/client";
 import { prisma, type Db } from "@/lib/prisma";
 
 /**
@@ -22,7 +22,7 @@ import { prisma, type Db } from "@/lib/prisma";
 
 export type Scope = "SELF" | "MENTOR" | "ADMIN";
 
-export type Action = "read" | "create" | "update" | "submit" | "review" | "decide";
+export type Action = "read" | "create" | "update" | "submit" | "review" | "decide" | "export";
 
 export type Actor = {
   /** Internal row id. */
@@ -43,10 +43,17 @@ export type Resource =
   | { kind: "weekly_report"; id: string }
   | { kind: "weekly_report_draft"; ownerId: string }
   | { kind: "correction"; id: string }
-  | { kind: "correction_new"; targetType: "WORK_LOG" | "WEEKLY_REPORT"; targetId: string }
+  | { kind: "correction_new"; targetType: CorrectionTarget; targetId: string }
   | { kind: "document"; id: string }
   | { kind: "timeline"; personId: string }
+  | { kind: "team"; id: string }
+  | { kind: "task"; id: string }
+  | { kind: "task_assignment"; id: string }
+  | { kind: "onboarding"; personId: string }
+  | { kind: "export"; dataset: ExportDataset }
   | { kind: "admin" };
+
+export type ExportDataset = "people" | "teams" | "work-logs" | "tasks";
 
 export type Grant = {
   scope: Scope;
@@ -133,6 +140,82 @@ export const PERSON_ADMIN_FIELDS = [
   "isAdmin",
 ] as const;
 
+/**
+ * What a person may change about themselves.
+ *
+ * `email` is absent deliberately: it is the login identity, and a person who
+ * can change it can redirect their own sign-in links. `isAdmin`, `status` and
+ * `personId` are absent for the obvious reasons. Everything here is a detail
+ * only the person themselves reliably knows.
+ */
+export const PERSON_SELF_FIELDS = [
+  "preferredName",
+  "phone",
+  "college",
+  "course",
+  "graduationYear",
+] as const;
+
+/** What an assignee may write on their own task submission, before submitting. */
+export const TASK_SUBMISSION_FIELDS = ["submissionNote", "links"] as const;
+
+export const TEAM_ADMIN_FIELDS = ["name", "leadId", "isActive"] as const;
+
+export const TASK_ADMIN_FIELDS = [
+  "title",
+  "description",
+  "teamId",
+  "dueDate",
+  "priority",
+  "status",
+] as const;
+
+/**
+ * What a person may put in their onboarding submission. Team and designation
+ * are *requested* here, not set: an admin confirms them, because they are what
+ * progress is grouped and reported by.
+ */
+export const ONBOARDING_FIELDS = [
+  "requestedTeamId",
+  "requestedDesignation",
+  "requestedType",
+  "proposedStartDate",
+  "preferredName",
+  "phone",
+  "college",
+  "course",
+  "graduationYear",
+] as const;
+
+/**
+ * Who owns the record a correction is aimed at, and whether it has been
+ * submitted. All three correctable kinds answer the same two questions, so the
+ * lookup is one function rather than a branch at every call site.
+ */
+async function correctionTargetOwner(
+  db: Db,
+  targetType: CorrectionTarget,
+  targetId: string,
+): Promise<{ personId: string; status: string } | null> {
+  switch (targetType) {
+    case "WORK_LOG":
+      return db.workLog.findUnique({
+        where: { id: targetId },
+        select: { personId: true, status: true },
+      });
+    case "WEEKLY_REPORT":
+      return db.weeklyReport.findUnique({
+        where: { id: targetId },
+        select: { personId: true, status: true },
+      });
+    case "TASK_ASSIGNMENT":
+      return db.taskAssignment.findUnique({
+        where: { id: targetId },
+        select: { personId: true, status: true },
+      });
+  }
+}
+
 /** Is `actorId` the mentor on any engagement of `subjectId`? */
 async function mentorsPerson(db: Db, actorId: string, subjectId: string): Promise<boolean> {
   const count = await db.engagement.count({
@@ -188,14 +271,15 @@ export async function authorize(
 
     case "person": {
       const scope = await scopeOver(db, actor, resource.id);
-      // Only an admin may change a person record; SELF profile editing is not
-      // a Stage 1 feature, so self and mentor are read-only here.
-      if (action !== "read" && scope !== "ADMIN") throw forbidden();
-      return {
-        scope,
-        subjectId: resource.id,
-        writableFields: scope === "ADMIN" ? PERSON_ADMIN_FIELDS : [],
-      };
+
+      // A person maintains their own contact and study details; an admin
+      // maintains everything. A mentor reads and writes nothing here.
+      if (action !== "read" && scope === "MENTOR") throw forbidden();
+
+      const writableFields =
+        scope === "ADMIN" ? PERSON_ADMIN_FIELDS : scope === "SELF" ? PERSON_SELF_FIELDS : [];
+
+      return { scope, subjectId: resource.id, writableFields };
     }
 
     case "timeline": {
@@ -283,17 +367,7 @@ export async function authorize(
 
     case "correction_new": {
       // Only the author of a submitted record may ask for it to be corrected.
-      const owner =
-        resource.targetType === "WORK_LOG"
-          ? await db.workLog.findUnique({
-              where: { id: resource.targetId },
-              select: { personId: true, status: true },
-            })
-          : await db.weeklyReport.findUnique({
-              where: { id: resource.targetId },
-              select: { personId: true, status: true },
-            });
-
+      const owner = await correctionTargetOwner(db, resource.targetType, resource.targetId);
       if (!owner) throw forbidden("not_found");
       if (owner.personId !== actor.id) throw forbidden("not_the_author");
       if (owner.status !== "SUBMITTED") throw forbidden("draft_records_are_edited_directly");
@@ -316,6 +390,132 @@ export async function authorize(
 
       const scope = await scopeOver(db, actor, correction.requestedById);
       return { scope, subjectId: correction.requestedById, writableFields: [] };
+    }
+
+    case "team": {
+      // Teams are structural, not personal: everyone signed in may see the
+      // list, because they need it to pick one. Only an admin may change one.
+      if (action !== "read" && !actor.isAdmin) throw forbidden("admin_only");
+      return {
+        scope: actor.isAdmin ? "ADMIN" : "SELF",
+        subjectId: actor.id,
+        writableFields: actor.isAdmin ? TEAM_ADMIN_FIELDS : [],
+      };
+    }
+
+    case "task": {
+      const task = await db.task.findUnique({
+        where: { id: resource.id },
+        select: { assignments: { select: { personId: true } } },
+      });
+      if (!task) throw forbidden("not_found");
+
+      // Creating, editing and assigning tasks is an admin act.
+      if (action !== "read") {
+        if (!actor.isAdmin) throw forbidden("admin_only");
+        return { scope: "ADMIN", subjectId: actor.id, writableFields: TASK_ADMIN_FIELDS };
+      }
+
+      if (actor.isAdmin) {
+        return { scope: "ADMIN", subjectId: actor.id, writableFields: [] };
+      }
+
+      const assigneeIds = task.assignments.map((a) => a.personId);
+      if (assigneeIds.includes(actor.id)) {
+        return { scope: "SELF", subjectId: actor.id, writableFields: [] };
+      }
+
+      // A mentor sees a task only because somebody they mentor is on it.
+      for (const assigneeId of assigneeIds) {
+        if (await mentorsPerson(db, actor.id, assigneeId)) {
+          return { scope: "MENTOR", subjectId: assigneeId, writableFields: [] };
+        }
+      }
+
+      throw forbidden();
+    }
+
+    case "task_assignment": {
+      const assignment = await db.taskAssignment.findUnique({
+        where: { id: resource.id },
+        select: { personId: true, status: true },
+      });
+      if (!assignment) throw forbidden("not_found");
+      const scope = await scopeOver(db, actor, assignment.personId);
+
+      if (action === "read") {
+        return { scope, subjectId: assignment.personId, writableFields: [] };
+      }
+
+      if (action === "update" || action === "submit") {
+        // Assignment is not authorship. Only the person the work was given to
+        // may hand it in, and an admin gets no direct write path either: a
+        // submitted record is corrected, never edited, so that the previous
+        // value is always retained.
+        if (scope !== "SELF") throw forbidden("not_the_author");
+        if (assignment.status === "SUBMITTED") {
+          throw forbidden("submitted_records_are_immutable");
+        }
+        return {
+          scope,
+          subjectId: assignment.personId,
+          writableFields: TASK_SUBMISSION_FIELDS,
+        };
+      }
+
+      throw forbidden("not_available_in_stage_1");
+    }
+
+    case "onboarding": {
+      // An admin decides; the person themselves fills it in while it is still
+      // pending. Mentors have no part in it — there is no mentor yet.
+      if (action === "decide") {
+        if (!actor.isAdmin) throw forbidden("admin_only");
+        return { scope: "ADMIN", subjectId: resource.personId, writableFields: [] };
+      }
+
+      if (actor.isAdmin) {
+        return {
+          scope: "ADMIN",
+          subjectId: resource.personId,
+          writableFields: action === "read" ? [] : ONBOARDING_FIELDS,
+        };
+      }
+
+      if (actor.id !== resource.personId) throw forbidden();
+
+      if (action !== "read") {
+        const existing = await db.onboardingSubmission.findUnique({
+          where: { personId: actor.id },
+          select: { status: true },
+        });
+        // Once an admin has decided, the submission is the record of what was
+        // asked for and by whom. It stops being editable.
+        if (existing && existing.status !== "PENDING") {
+          throw forbidden("onboarding_already_decided");
+        }
+      }
+
+      return {
+        scope: "SELF",
+        subjectId: actor.id,
+        writableFields: action === "read" ? [] : ONBOARDING_FIELDS,
+      };
+    }
+
+    case "export": {
+      // A CSV of names, emails, phones and colleges is an export of personal
+      // data. Admins export everyone; a mentor exports the people they mentor
+      // and nobody else; everyone else is refused outright.
+      if (action !== "export" && action !== "read") throw forbidden();
+      if (actor.isAdmin) {
+        return { scope: "ADMIN", subjectId: actor.id, writableFields: [] };
+      }
+
+      const mentees = await db.engagement.count({ where: { mentorId: actor.id } });
+      if (mentees === 0) throw forbidden("export_requires_mentor_or_admin");
+
+      return { scope: "MENTOR", subjectId: actor.id, writableFields: [] };
     }
 
     case "document": {

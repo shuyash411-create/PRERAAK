@@ -7,8 +7,10 @@ import { authorize, AuthzError } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import { allocatePersonId } from "@/lib/person-id";
 import { recordEvent } from "@/lib/timeline";
-import { formatIstDate, istDateString, istDateToUtcMidnight } from "@/lib/ist";
+import { formatIstDate, istDateString, istDateToUtcMidnight, utcMidnightToIstDate } from "@/lib/ist";
 import { closeEngagement, createEngagement, createPerson } from "@/lib/validation/person";
+import { decideOnboarding } from "@/lib/validation/onboarding";
+import { createTask } from "@/lib/validation/task";
 import { decideCorrection as applyDecision } from "@/lib/corrections";
 
 export type ActionResult = { ok: true } | { ok: false; message: string };
@@ -101,7 +103,7 @@ export async function createEngagementAction(formData: FormData): Promise<Action
       personId: formData.get("personId"),
       type: formData.get("type"),
       designation: formData.get("designation"),
-      department: formData.get("department") || undefined,
+      teamId: formData.get("teamId") || null,
       mentorId: formData.get("mentorId") || null,
       startDate: formData.get("startDate"),
       workMode: formData.get("workMode") || undefined,
@@ -126,7 +128,7 @@ export async function createEngagementAction(formData: FormData): Promise<Action
           personId: input.personId,
           type: input.type,
           designation: input.designation,
-          department: input.department ?? null,
+          teamId: input.teamId ?? null,
           mentorId: input.mentorId ?? null,
           startDate: istDateToUtcMidnight(input.startDate),
           status,
@@ -208,6 +210,192 @@ export async function decideCorrectionAction(formData: FormData): Promise<Action
     await applyDecision({ correctionId, decision, adminId: actor.id });
 
     revalidatePath("/admin/people");
+    return { ok: true };
+  } catch (error) {
+    return friendly(error);
+  }
+}
+
+/**
+ * Confirm or decline somebody's onboarding.
+ *
+ * Confirming opens the engagement in the same transaction as the decision and
+ * the timeline entries, so the record always says what was requested and what
+ * was actually accepted.
+ */
+export async function decideOnboardingAction(formData: FormData): Promise<ActionResult> {
+  try {
+    const actor = await currentActor();
+    const submissionId = String(formData.get("submissionId") ?? "");
+
+    const target = await prisma.onboardingSubmission.findUnique({
+      where: { id: submissionId },
+      select: { personId: true },
+    });
+    await authorize(actor, "decide", { kind: "onboarding", personId: target?.personId ?? "" });
+    if (!actor) throw new AuthzError(401, "unauthenticated");
+
+    const input = decideOnboarding.parse({
+      decision: formData.get("decision"),
+      teamId: formData.get("teamId") || null,
+      designation: formData.get("designation") || undefined,
+      type: formData.get("type") || undefined,
+      startDate: formData.get("startDate") || undefined,
+      mentorId: formData.get("mentorId") || null,
+    });
+
+    await prisma.$transaction(async (tx) => {
+      const submission = await tx.onboardingSubmission.findUnique({
+        where: { id: submissionId },
+        include: { person: { select: { fullName: true } } },
+      });
+      if (!submission) throw new AuthzError(403, "not_found", "No such onboarding submission.");
+      if (submission.status !== "PENDING") {
+        throw new AuthzError(
+          403,
+          "already_decided",
+          `That submission was already ${submission.status.toLowerCase()}.`,
+        );
+      }
+
+      if (input.decision === "REJECT") {
+        await tx.onboardingSubmission.update({
+          where: { id: submissionId },
+          data: { status: "REJECTED", decidedById: actor.id, decidedAt: new Date() },
+        });
+        await recordEvent(tx, {
+          personId: submission.personId,
+          eventType: "ONBOARDING_REJECTED",
+          description: `Onboarding details from ${submission.person.fullName} were declined.`,
+          actorId: actor.id,
+          metadata: { submissionId },
+        });
+        return;
+      }
+
+      const open = await tx.engagement.findFirst({
+        where: { personId: submission.personId, status: { in: ["ACTIVE", "UPCOMING"] } },
+      });
+      if (open) {
+        throw new AuthzError(
+          403,
+          "engagement_already_open",
+          "That person already has an open engagement.",
+        );
+      }
+
+      const teamId = input.teamId !== undefined ? input.teamId : submission.requestedTeamId;
+      const designation = input.designation ?? submission.requestedDesignation;
+      const type = input.type ?? submission.requestedType;
+      const startDate = input.startDate ?? utcMidnightToIstDate(submission.proposedStartDate);
+
+      if (input.mentorId && input.mentorId === submission.personId) {
+        throw new AuthzError(403, "self_mentor", "A person cannot be their own mentor.");
+      }
+
+      const engagement = await tx.engagement.create({
+        data: {
+          personId: submission.personId,
+          type,
+          designation,
+          teamId: teamId ?? null,
+          mentorId: input.mentorId ?? null,
+          startDate: istDateToUtcMidnight(startDate),
+          status: startDate <= istDateString() ? "ACTIVE" : "UPCOMING",
+        },
+      });
+
+      await tx.onboardingSubmission.update({
+        where: { id: submissionId },
+        data: { status: "CONFIRMED", decidedById: actor.id, decidedAt: new Date() },
+      });
+
+      await recordEvent(tx, {
+        personId: submission.personId,
+        eventType: "ONBOARDING_CONFIRMED",
+        description: `Onboarding confirmed as ${designation}, starting ${formatIstDate(startDate)}.`,
+        actorId: actor.id,
+        metadata: {
+          submissionId,
+          engagementId: engagement.id,
+          requested: {
+            teamId: submission.requestedTeamId,
+            designation: submission.requestedDesignation,
+            startDate: utcMidnightToIstDate(submission.proposedStartDate),
+          },
+          confirmed: { teamId, designation, type, startDate },
+        },
+      });
+
+      await recordEvent(tx, {
+        personId: submission.personId,
+        eventType: "ENGAGEMENT_CREATED",
+        description: `${type === "INTERNSHIP" ? "Internship" : "Employment"} as ${designation} began on ${formatIstDate(startDate)}.`,
+        actorId: actor.id,
+        metadata: { engagementId: engagement.id, type, designation, startDate },
+      });
+    });
+
+    revalidatePath("/admin/onboarding");
+    revalidatePath("/admin/people");
+    return { ok: true };
+  } catch (error) {
+    return friendly(error);
+  }
+}
+
+/** Create a task and give it to people. Admin only. */
+export async function createTaskAction(formData: FormData): Promise<ActionResult> {
+  try {
+    const actor = await currentActor();
+    await authorize(actor, "create", { kind: "admin" });
+    if (!actor) throw new AuthzError(401, "unauthenticated");
+
+    const input = createTask.parse({
+      title: formData.get("title"),
+      description: formData.get("description") || null,
+      teamId: formData.get("teamId") || null,
+      dueDate: formData.get("dueDate"),
+      priority: formData.get("priority") || "NORMAL",
+      assigneeIds: formData.getAll("assigneeIds").map(String).filter(Boolean),
+    });
+
+    const assignees = await prisma.person.findMany({
+      where: { id: { in: input.assigneeIds }, status: { not: "ARCHIVED" } },
+      select: { id: true },
+    });
+    if (assignees.length !== input.assigneeIds.length) {
+      return { ok: false, message: "One of those people could not be found." };
+    }
+
+    await prisma.$transaction(async (tx) => {
+      const task = await tx.task.create({
+        data: {
+          title: input.title,
+          description: input.description ?? null,
+          teamId: input.teamId ?? null,
+          dueDate: istDateToUtcMidnight(input.dueDate),
+          priority: input.priority,
+          createdById: actor.id,
+          assignments: {
+            create: assignees.map((a) => ({ personId: a.id, assignedById: actor.id })),
+          },
+        },
+      });
+
+      for (const a of assignees) {
+        await recordEvent(tx, {
+          personId: a.id,
+          eventType: "TASK_ASSIGNED",
+          description: `Assigned "${input.title}", due ${formatIstDate(input.dueDate)}.`,
+          actorId: actor.id,
+          metadata: { taskId: task.id, dueDate: input.dueDate },
+        });
+      }
+    });
+
+    revalidatePath("/admin/tasks");
+    revalidatePath("/tasks");
     return { ok: true };
   } catch (error) {
     return friendly(error);

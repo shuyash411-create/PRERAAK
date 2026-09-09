@@ -47,7 +47,7 @@ export const GET = guarded({ action: "read", resource: { kind: "admin" } }, asyn
             id: true,
             type: true,
             designation: true,
-            department: true,
+            team: { select: { id: true, name: true } },
             status: true,
             mentor: { select: { id: true, fullName: true, preferredName: true } },
           },

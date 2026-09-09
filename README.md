@@ -3,8 +3,18 @@
 Internal people management for PRERAAK. Not a product — a small tool for ~10
 people today, ~20 within a year, never more than 50.
 
-**Stage 1 (foundation) is built.** Stage 2 (mentor views, digests, leave) and
-Stage 3 (documents, PDFs, certificates) are not started.
+**Built:** permanent identities and engagement stacks, immutable work logs and
+weekly reports, corrections, an append-only timeline, magic-link auth, admin
+people management — plus teams, tasks with deadlines, self-service onboarding
+and CSV exports.
+
+**Not built:** mentor review UI, the weekly founder digest, Friday reminders,
+leave requests, and everything to do with documents (uploads, PDFs, letters,
+certificates).
+
+Tasks and CSV exports were on the original brief's do-not-build list. They were
+added later at the founder's explicit request, and built deliberately small —
+no project management, no analytics dashboard, no generalised approval engine.
 
 ## The three invariants
 
@@ -97,7 +107,7 @@ preview would have no way in at all.
 ## Tests
 
 ```bash
-npm test            # 83 tests
+npm test            # 142 tests
 npm run typecheck
 npm run lint
 ```
@@ -124,6 +134,52 @@ the ones that rot silently as routes get added:
 The schema is also scanned to prove it collects none of the sensitive fields
 the brief excludes, records nothing resembling attendance, and that no file
 outside `lib/ist.ts` derives a date with `toISOString().slice(0, 10)`.
+
+## Teams, tasks and onboarding
+
+**Teams** are a real table, not a free-text field. Team-level progress is
+reported on and exported, and "Engineering" / "engineering" / "Enginering"
+grouping as three teams would quietly corrupt every rollup. A person belongs to
+a team through their engagement. Teams are retired with `isActive`, never
+deleted, so historical rollups stay correct.
+
+**Onboarding** is how an invited person gets set up. An admin creates them with
+a name and email; on first sign-in they land on `/onboarding` and fill in their
+own details, plus the team and designation they believe they are joining as.
+Those two are *requested*, not set — an admin confirms them, and that
+confirmation is what opens the engagement and unlocks work logging. Both what
+was asked for and what was accepted go on the timeline. Admins are exempt from
+the redirect, so nobody can be stranded behind a queue no one can clear.
+
+**Tasks** have a deadline, a team and one or more assignees. Only an admin
+creates and assigns; only the assignee submits against their own assignment.
+Submitting is one way — afterwards the submission is read-only to its author
+*and* to admins, and changes go through the same correction flow as a work log.
+
+Deadlines are the one place this system talks about lateness, and it is
+lateness against a date somebody agreed to. Nothing anywhere reasons about the
+time of day work happened.
+
+## CSV exports
+
+Four exports at `/admin/export`: people and progress, team summary, raw work
+logs, and tasks with assignments.
+
+Scope follows the rest of the app: an admin exports everyone, a mentor exports
+the people they mentor and nobody else, and everyone else is refused. The
+filter is applied to the query, so out-of-scope rows are never fetched.
+
+Two details in `src/lib/csv.ts` are load-bearing rather than cosmetic. Fields
+are quoted per RFC 4180, because work log summaries are free text containing
+commas, quotes and newlines. And any cell beginning `=`, `+`, `-` or `@` is
+prefixed with an apostrophe: a spreadsheet treats those as formulas, so a
+summary reading `=HYPERLINK(...)` would otherwise become live code when the
+file is opened.
+
+Every download writes a `DATA_EXPORTED` event to the append-only timeline with
+the dataset, row count and range. A CSV of names, emails, phones and colleges
+is an export of personal data, and under the DPDP Act it should be possible to
+say afterwards who took what and when.
 
 ## Authorization
 

@@ -1,7 +1,7 @@
 import { db } from "./db";
 import { allocatePersonId } from "@/lib/person-id";
 import { istDateToUtcMidnight, istDateString } from "@/lib/ist";
-import type { Person, Engagement, WorkLog } from "@prisma/client";
+import type { Person, Engagement, WorkLog, Team, Task, TaskAssignment } from "@prisma/client";
 
 let counter = 0;
 const uniqueEmail = (label: string) => `${label}-${++counter}-${Date.now()}@example.test`;
@@ -67,4 +67,58 @@ export async function makeIntern(
 ): Promise<{ person: Person; engagement: Engagement }> {
   const person = await makePerson(overrides);
   return { person, engagement: await makeEngagement(person.id, engagement) };
+}
+
+export async function makeTeam(name = `Team ${++counter}`): Promise<Team> {
+  return db.team.create({
+    data: { name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g, "-") },
+  });
+}
+
+export async function makeTask(
+  createdById: string,
+  overrides: Partial<{ title: string; dueDate: string; teamId: string | null }> = {},
+): Promise<Task> {
+  return db.task.create({
+    data: {
+      title: overrides.title ?? "Write the migration",
+      dueDate: istDateToUtcMidnight(overrides.dueDate ?? istDateString()),
+      teamId: overrides.teamId ?? null,
+      createdById,
+    },
+  });
+}
+
+export async function assign(
+  taskId: string,
+  personId: string,
+  assignedById: string,
+  overrides: Partial<{ status: "ASSIGNED" | "IN_PROGRESS" | "SUBMITTED"; submissionNote: string }> = {},
+): Promise<TaskAssignment> {
+  const status = overrides.status ?? "ASSIGNED";
+  return db.taskAssignment.create({
+    data: {
+      taskId,
+      personId,
+      assignedById,
+      status,
+      submissionNote: overrides.submissionNote ?? (status === "SUBMITTED" ? "Handed in." : null),
+      submittedAt: status === "SUBMITTED" ? new Date() : null,
+    },
+  });
+}
+
+export async function makeOnboarding(
+  personId: string,
+  overrides: Partial<{ designation: string; teamId: string | null; status: "PENDING" | "CONFIRMED" | "REJECTED" }> = {},
+) {
+  return db.onboardingSubmission.create({
+    data: {
+      personId,
+      requestedDesignation: overrides.designation ?? "Engineering Intern",
+      requestedTeamId: overrides.teamId ?? null,
+      proposedStartDate: istDateToUtcMidnight(istDateString()),
+      status: overrides.status ?? "PENDING",
+    },
+  });
 }

@@ -89,11 +89,20 @@ async function main(): Promise<void> {
     },
   });
 
+  const engineering = await db.team.create({
+    data: { name: "[DEV] Engineering", slug: "dev-engineering", leadId: mentor.id },
+  });
+
+  const design = await db.team.create({
+    data: { name: "[DEV] Design", slug: "dev-design" },
+  });
+
   await db.engagement.create({
     data: {
       personId: founder.id,
       type: "EMPLOYMENT",
       designation: "Founder",
+      teamId: design.id,
       startDate: istDateToUtcMidnight("2024-01-01"),
       status: "ACTIVE",
       workMode: "HYBRID",
@@ -105,6 +114,7 @@ async function main(): Promise<void> {
       personId: mentor.id,
       type: "EMPLOYMENT",
       designation: "Engineering Lead",
+      teamId: engineering.id,
       startDate: istDateToUtcMidnight("2025-03-01"),
       status: "ACTIVE",
       workMode: "REMOTE",
@@ -116,7 +126,7 @@ async function main(): Promise<void> {
       personId: intern.id,
       type: "INTERNSHIP",
       designation: "Engineering Intern",
-      department: "Engineering",
+      teamId: engineering.id,
       mentorId: mentor.id,
       startDate: istDateToUtcMidnight(addIstDays(today, -30)),
       status: "ACTIVE",
@@ -137,6 +147,37 @@ async function main(): Promise<void> {
         summary,
         status: "SUBMITTED",
         submittedAt: new Date(),
+      },
+    });
+  }
+
+  const tasks = [
+    { title: "[DEV] Write the onboarding form", due: 5, submitted: false },
+    { title: "[DEV] Review the IST helpers", due: -2, submitted: false },
+    { title: "[DEV] Draft the export columns", due: -6, submitted: true },
+  ];
+
+  for (const spec of tasks) {
+    const task = await db.task.create({
+      data: {
+        title: spec.title,
+        description: "Development seed data.",
+        teamId: engineering.id,
+        dueDate: istDateToUtcMidnight(addIstDays(today, spec.due)),
+        createdById: founder.id,
+        priority: spec.due < 0 ? "HIGH" : "NORMAL",
+        status: spec.submitted ? "COMPLETED" : "OPEN",
+      },
+    });
+
+    await db.taskAssignment.create({
+      data: {
+        taskId: task.id,
+        personId: intern.id,
+        assignedById: founder.id,
+        status: spec.submitted ? "SUBMITTED" : "ASSIGNED",
+        submissionNote: spec.submitted ? "[DEV] Wrote up the column list and shared it." : null,
+        submittedAt: spec.submitted ? new Date() : null,
       },
     });
   }

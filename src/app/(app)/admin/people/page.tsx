@@ -4,7 +4,14 @@ import { currentActor } from "@/lib/auth";
 import { authorize, AuthzError } from "@/lib/authz";
 import { prisma } from "@/lib/prisma";
 import type { Prisma } from "@prisma/client";
-import { buttonClass, EmptyState, inputClass, PageHeader, StatusPill } from "@/components/ui";
+import {
+  buttonClass,
+  EmptyState,
+  inputClass,
+  PageHeader,
+  secondaryButtonClass,
+  StatusPill,
+} from "@/components/ui";
 
 const PER_PAGE = 25;
 
@@ -49,7 +56,10 @@ export default async function AdminPeoplePage({
         engagements: {
           orderBy: { startDate: "desc" },
           take: 1,
-          include: { mentor: { select: { fullName: true, preferredName: true } } },
+          include: {
+            mentor: { select: { fullName: true, preferredName: true } },
+            team: { select: { name: true } },
+          },
         },
       },
     }),
@@ -64,9 +74,12 @@ export default async function AdminPeoplePage({
         title="People"
         subtitle={`${total} ${total === 1 ? "person" : "people"}`}
         action={
-          <Link href="/admin/people/new" className={buttonClass}>
-            Add a person
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/admin/onboarding" className={secondaryButtonClass}>Onboarding</Link>
+            <Link href="/admin/tasks" className={secondaryButtonClass}>Tasks</Link>
+            <Link href="/admin/export" className={secondaryButtonClass}>Export</Link>
+            <Link href="/admin/people/new" className={buttonClass}>Add a person</Link>
+          </div>
         }
       />
 
@@ -110,6 +123,7 @@ export default async function AdminPeoplePage({
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Id</th>
                 <th scope="col" className="px-4 py-3 font-medium">Name</th>
+                <th scope="col" className="px-4 py-3 font-medium">Team</th>
                 <th scope="col" className="px-4 py-3 font-medium">Designation</th>
                 <th scope="col" className="px-4 py-3 font-medium">Mentor</th>
                 <th scope="col" className="px-4 py-3 font-medium">Status</th>
@@ -129,6 +143,9 @@ export default async function AdminPeoplePage({
                         {person.fullName}
                       </Link>
                       <p className="text-xs text-ink-400">{person.email}</p>
+                    </td>
+                    <td className="px-4 py-3 text-ink-700">
+                      {engagement?.team?.name ?? <span className="text-ink-400">—</span>}
                     </td>
                     <td className="px-4 py-3 text-ink-700">
                       {engagement?.designation ?? <span className="text-ink-400">—</span>}

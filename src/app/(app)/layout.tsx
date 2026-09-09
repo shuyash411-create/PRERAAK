@@ -3,10 +3,21 @@ import { redirect } from "next/navigation";
 import { currentActor } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { signOut } from "@/lib/auth";
+import { needsOnboarding } from "@/lib/onboarding";
+import { headers } from "next/headers";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const actor = await currentActor();
   if (!actor) redirect("/login");
+
+  // Somebody invited but not yet set up has nothing to do anywhere else, so
+  // send them to complete onboarding first. Admins are exempt: they are the
+  // people who clear the queue, and locking them behind it would strand
+  // everyone.
+  const pathname = (await headers()).get("x-pathname") ?? "";
+  if (!pathname.startsWith("/onboarding") && (await needsOnboarding(actor))) {
+    redirect("/onboarding");
+  }
 
   const person = await prisma.person.findUniqueOrThrow({
     where: { id: actor.id },
@@ -30,6 +41,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           <nav aria-label="Main" className="flex items-center gap-1 text-sm">
             <NavLink href="/my-work">My work</NavLink>
+            <NavLink href="/tasks">Tasks</NavLink>
             <NavLink href="/weekly">Weekly</NavLink>
             <NavLink href="/profile">Profile</NavLink>
             {actor.isAdmin ? <NavLink href="/admin/people">Admin</NavLink> : null}

@@ -7,7 +7,7 @@ import { buttonClass, ErrorNote, secondaryButtonClass } from "@/components/ui";
 
 type Correction = {
   id: string;
-  targetType: "WORK_LOG" | "WEEKLY_REPORT";
+  targetType: "WORK_LOG" | "WEEKLY_REPORT" | "TASK_ASSIGNMENT";
   reason: string;
   proposedValue: unknown;
   createdAt: Date;
@@ -53,7 +53,11 @@ export function CorrectionQueue({ corrections }: { corrections: Correction[] }) 
           return (
             <li key={correction.id} className="rounded-lg border border-cream-300 bg-cream-50 p-4">
               <p className="text-xs font-medium uppercase tracking-wide text-ink-400">
-                {correction.targetType === "WORK_LOG" ? "Work log" : "Weekly report"}
+                {correction.targetType === "WORK_LOG"
+                  ? "Work log"
+                  : correction.targetType === "WEEKLY_REPORT"
+                    ? "Weekly report"
+                    : "Task submission"}
               </p>
 
               <p className="mt-2 text-sm text-ink-900">

@@ -24,7 +24,10 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
     include: {
       engagements: {
         orderBy: { startDate: "desc" },
-        include: { mentor: { select: { id: true, fullName: true, preferredName: true } } },
+        include: {
+          mentor: { select: { id: true, fullName: true, preferredName: true } },
+          team: { select: { id: true, name: true } },
+        },
       },
       timeline: {
         orderBy: { occurredAt: "desc" },
@@ -87,7 +90,7 @@ export default async function AdminPersonPage({ params }: { params: Promise<{ id
           id: engagement.id,
           type: engagement.type,
           designation: engagement.designation,
-          department: engagement.department,
+          teamName: engagement.team?.name ?? null,
           status: engagement.status,
           workMode: engagement.workMode,
           startDate: utcMidnightToIstDate(engagement.startDate),

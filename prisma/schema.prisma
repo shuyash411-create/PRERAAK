@@ -50,6 +50,7 @@ enum SubmissionStatus {
 enum CorrectionTarget {
   WORK_LOG
   WEEKLY_REPORT
+  TASK_ASSIGNMENT
 }
 
 enum CorrectionStatus {
@@ -61,6 +62,31 @@ enum CorrectionStatus {
 enum DocumentVisibility {
   ADMIN_ONLY
   PERSON_VISIBLE
+}
+
+enum TaskStatus {
+  OPEN
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum AssignmentStatus {
+  ASSIGNED
+  IN_PROGRESS
+  SUBMITTED
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+}
+
+enum OnboardingStatus {
+  PENDING
+  CONFIRMED
+  REJECTED
 }
 
 /// A human being. Created once, never deleted. `status` moves to ARCHIVED
@@ -89,18 +115,23 @@ model Person {
   updatedAt       DateTime     @updatedAt @map("updated_at")
   archivedAt      DateTime?    @map("archived_at")
 
-  engagements        Engagement[]        @relation("PersonEngagements")
-  mentoring          Engagement[]        @relation("EngagementMentor")
-  workLogs           WorkLog[]           @relation("WorkLogAuthor")
-  reviewedWorkLogs   WorkLog[]           @relation("WorkLogReviewer")
-  weeklyReports      WeeklyReport[]      @relation("WeeklyReportAuthor")
-  reviewedWeeklies   WeeklyReport[]      @relation("WeeklyReportReviewer")
-  correctionsAsked   CorrectionRequest[] @relation("CorrectionRequester")
-  correctionsDecided CorrectionRequest[] @relation("CorrectionDecider")
-  documents          Document[]          @relation("DocumentSubject")
-  documentsUploaded  Document[]          @relation("DocumentUploader")
-  timeline           TimelineEvent[]     @relation("TimelineSubject")
-  timelineActed      TimelineEvent[]     @relation("TimelineActor")
+  engagements        Engagement[]          @relation("PersonEngagements")
+  mentoring          Engagement[]          @relation("EngagementMentor")
+  workLogs           WorkLog[]             @relation("WorkLogAuthor")
+  reviewedWorkLogs   WorkLog[]             @relation("WorkLogReviewer")
+  weeklyReports      WeeklyReport[]        @relation("WeeklyReportAuthor")
+  reviewedWeeklies   WeeklyReport[]        @relation("WeeklyReportReviewer")
+  correctionsAsked   CorrectionRequest[]   @relation("CorrectionRequester")
+  correctionsDecided CorrectionRequest[]   @relation("CorrectionDecider")
+  documents          Document[]            @relation("DocumentSubject")
+  documentsUploaded  Document[]            @relation("DocumentUploader")
+  timeline           TimelineEvent[]       @relation("TimelineSubject")
+  timelineActed      TimelineEvent[]       @relation("TimelineActor")
+  teamsLed           Team[]                @relation("TeamLead")
+  tasksCreated       Task[]                @relation("TaskCreator")
+  taskAssignments    TaskAssignment[]      @relation("TaskAssignee")
+  taskReviews        TaskAssignment[]      @relation("TaskReviewer")
+  onboarding         OnboardingSubmission? @relation("OnboardingSubject")
 
   @@index([personId])
   @@index([email])
@@ -117,7 +148,8 @@ model Engagement {
   person         Person           @relation("PersonEngagements", fields: [personId], references: [id])
   type           EngagementType
   designation    String
-  department     String?
+  teamId         String?          @map("team_id")
+  team           Team?            @relation(fields: [teamId], references: [id])
   mentorId       String?          @map("mentor_id")
   mentor         Person?          @relation("EngagementMentor", fields: [mentorId], references: [id])
   startDate      DateTime         @map("start_date") @db.Date
@@ -134,6 +166,7 @@ model Engagement {
   @@index([personId])
   @@index([mentorId])
   @@index([status])
+  @@index([teamId])
   @@map("engagements")
 }
 
@@ -267,4 +300,108 @@ model VerificationToken {
 
   @@unique([identifier, token])
   @@map("verification_tokens")
+}
+
+/// A team people belong to through their engagement.
+///
+/// A real table rather than a free-text field because team-level progress is
+/// reported on and exported: "Engineering", "engineering" and "Enginering"
+/// grouping as three teams would quietly corrupt every rollup.
+model Team {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  slug      String   @unique
+  leadId    String?  @map("lead_id")
+  lead      Person?  @relation("TeamLead", fields: [leadId], references: [id])
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  engagements Engagement[]
+  tasks       Task[]
+  onboardings OnboardingSubmission[] @relation("OnboardingTeam")
+
+  @@index([isActive])
+  @@map("teams")
+}
+
+/// A piece of work with a deadline, created by an admin and given to people.
+///
+/// `dueDate` is an IST calendar date. "Overdue" is a fact about that date,
+/// never about the time of day somebody worked — section 1.2 of the brief
+/// holds here as everywhere else.
+model Task {
+  id          String       @id @default(cuid())
+  title       String
+  description String?
+  teamId      String?      @map("team_id")
+  team        Team?        @relation(fields: [teamId], references: [id])
+  dueDate     DateTime     @map("due_date") @db.Date
+  priority    TaskPriority @default(NORMAL)
+  status      TaskStatus   @default(OPEN)
+  createdById String       @map("created_by")
+  createdBy   Person       @relation("TaskCreator", fields: [createdById], references: [id])
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  assignments TaskAssignment[]
+
+  @@index([status])
+  @@index([dueDate])
+  @@index([teamId])
+  @@map("tasks")
+}
+
+/// One row per person per task, carrying that person's submission.
+///
+/// Submitting is one way. Afterwards the content is read-only to its author
+/// and to admins alike, exactly like a work log; changes go through a
+/// correction request so the previous value is always retained.
+model TaskAssignment {
+  id             String           @id @default(cuid())
+  taskId         String           @map("task_id")
+  task           Task             @relation(fields: [taskId], references: [id])
+  personId       String           @map("person_id")
+  person         Person           @relation("TaskAssignee", fields: [personId], references: [id])
+  status         AssignmentStatus @default(ASSIGNED)
+  submissionNote String?          @map("submission_note")
+  links          String[]         @default([])
+  submittedAt    DateTime?        @map("submitted_at")
+  reviewedById   String?          @map("reviewed_by")
+  reviewedBy     Person?          @relation("TaskReviewer", fields: [reviewedById], references: [id])
+  reviewedAt     DateTime?        @map("reviewed_at")
+  mentorComment  String?          @map("mentor_comment")
+  assignedById   String           @map("assigned_by")
+  createdAt      DateTime         @default(now()) @map("created_at")
+  updatedAt      DateTime         @updatedAt @map("updated_at")
+
+  @@unique([taskId, personId])
+  @@index([personId, status])
+  @@map("task_assignments")
+}
+
+/// What an invited person says about themselves before an admin turns it into
+/// an engagement.
+///
+/// The person does the typing; the admin decides what becomes a record. Team
+/// and designation are what progress is grouped by, so they are confirmed
+/// rather than self-declared. Kept after the decision as evidence of what was
+/// submitted and who accepted it.
+model OnboardingSubmission {
+  id                   String           @id @default(cuid())
+  personId             String           @unique @map("person_id")
+  person               Person           @relation("OnboardingSubject", fields: [personId], references: [id])
+  requestedTeamId      String?          @map("requested_team_id")
+  requestedTeam        Team?            @relation("OnboardingTeam", fields: [requestedTeamId], references: [id])
+  requestedDesignation String           @map("requested_designation")
+  requestedType        EngagementType   @default(INTERNSHIP) @map("requested_type")
+  proposedStartDate    DateTime         @map("proposed_start_date") @db.Date
+  status               OnboardingStatus @default(PENDING)
+  decidedById          String?          @map("decided_by")
+  decidedAt            DateTime?        @map("decided_at")
+  createdAt            DateTime         @default(now()) @map("created_at")
+  updatedAt            DateTime         @updatedAt @map("updated_at")
+
+  @@index([status])
+  @@map("onboarding_submissions")
 }

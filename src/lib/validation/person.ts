@@ -24,7 +24,7 @@ export const createEngagement = z.object({
   personId: z.string().min(1),
   type: z.enum(["INTERNSHIP", "EMPLOYMENT"]),
   designation: shortText(200),
-  department: shortText(200).optional(),
+  teamId: z.string().min(1).nullish(),
   mentorId: z.string().min(1).nullish(),
   startDate: istDate,
   workMode: z.enum(["ONSITE", "REMOTE", "HYBRID"]).optional(),

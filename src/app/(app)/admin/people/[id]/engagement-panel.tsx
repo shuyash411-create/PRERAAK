@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { closeEngagementAction, createEngagementAction } from "@/app/actions/admin";
+import { formatIstDate } from "@/lib/ist";
 import {
   buttonClass,
   ErrorNote,
@@ -16,7 +17,7 @@ type Engagement = {
   id: string;
   type: "INTERNSHIP" | "EMPLOYMENT";
   designation: string;
-  department: string | null;
+  teamName: string | null;
   status: "UPCOMING" | "ACTIVE" | "COMPLETED" | "TERMINATED";
   workMode: "ONSITE" | "REMOTE" | "HYBRID" | null;
   startDate: string;
@@ -162,11 +163,12 @@ export function EngagementPanel({
                     <p className="font-medium text-ink-900">{engagement.designation}</p>
                     <p className="mt-0.5 text-sm text-ink-500">
                       {engagement.type === "INTERNSHIP" ? "Internship" : "Employment"}
-                      {engagement.department ? ` · ${engagement.department}` : ""}
+                      {engagement.teamName ? ` · ${engagement.teamName}` : ""}
                       {engagement.workMode ? ` · ${engagement.workMode.toLowerCase()}` : ""}
                     </p>
                     <p className="mt-1 text-sm text-ink-500">
-                      {engagement.startDate} — {engagement.endDate ?? "present"}
+                      {formatIstDate(engagement.startDate)} —{" "}
+                      {engagement.endDate ? formatIstDate(engagement.endDate) : "present"}
                       {engagement.mentorName ? ` · mentor ${engagement.mentorName}` : ""}
                     </p>
                   </div>

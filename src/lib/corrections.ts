@@ -73,8 +73,10 @@ export async function decideCorrection(params: {
 
     if (correction.targetType === "WORK_LOG") {
       await tx.workLog.update({ where: { id: correction.targetId }, data: proposed });
-    } else {
+    } else if (correction.targetType === "WEEKLY_REPORT") {
       await tx.weeklyReport.update({ where: { id: correction.targetId }, data: proposed });
+    } else {
+      await tx.taskAssignment.update({ where: { id: correction.targetId }, data: proposed });
     }
 
     await tx.correctionRequest.update({
@@ -116,7 +118,9 @@ async function snapshot(
   const record =
     targetType === "WORK_LOG"
       ? await tx.workLog.findUnique({ where: { id: targetId } })
-      : await tx.weeklyReport.findUnique({ where: { id: targetId } });
+      : targetType === "WEEKLY_REPORT"
+        ? await tx.weeklyReport.findUnique({ where: { id: targetId } })
+        : await tx.taskAssignment.findUnique({ where: { id: targetId } });
 
   if (!record) throw new RequestError(404, "not_found", "The record being corrected no longer exists.");
 
@@ -125,5 +129,7 @@ async function snapshot(
 }
 
 function label(target: CorrectionTarget): string {
-  return target === "WORK_LOG" ? "a work log" : "a weekly report";
+  if (target === "WORK_LOG") return "a work log";
+  if (target === "WEEKLY_REPORT") return "a weekly report";
+  return "a task submission";
 }

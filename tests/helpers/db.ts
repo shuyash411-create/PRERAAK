@@ -14,12 +14,16 @@ export const db = new PrismaClient();
 export async function resetDatabase(): Promise<void> {
   await db.$executeRawUnsafe(`
     TRUNCATE TABLE
+      task_assignments,
+      tasks,
+      onboarding_submissions,
       timeline_events,
       correction_requests,
       documents,
       work_logs,
       weekly_reports,
       engagements,
+      teams,
       verification_tokens,
       people
     RESTART IDENTITY CASCADE

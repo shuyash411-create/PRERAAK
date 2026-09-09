@@ -26,7 +26,7 @@ export const GET = guarded({ action: "read", resource: { kind: "self" } }, async
           id: true,
           type: true,
           designation: true,
-          department: true,
+          team: { select: { id: true, name: true, slug: true } },
           status: true,
           workMode: true,
           startDate: true,
@@ -38,6 +38,11 @@ export const GET = guarded({ action: "read", resource: { kind: "self" } }, async
   });
 
   if (!person) return NextResponse.json({ error: "not_found" }, { status: 404 });
+
+  const onboarding = await prisma.onboardingSubmission.findUnique({
+    where: { personId: actor.id },
+    select: { status: true },
+  });
 
   const engagements = person.engagements.map((engagement) => ({
     ...engagement,
@@ -60,6 +65,12 @@ export const GET = guarded({ action: "read", resource: { kind: "self" } }, async
     },
     engagements,
     currentEngagement,
+    // Somebody invited but not yet set up: no engagement, and nothing pending
+    // with an admin. Admins are never sent to onboarding — they are the people
+    // who clear the queue.
+    needsOnboarding:
+      !person.isAdmin && person.engagements.length === 0 && onboarding?.status !== "PENDING",
+    onboardingStatus: onboarding?.status ?? null,
     today: istDateString(),
   });
 });

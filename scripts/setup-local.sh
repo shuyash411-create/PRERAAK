@@ -134,7 +134,7 @@ cat <<'DONE'
 
 ==> Ready.
     npm run dev    http://localhost:3000
-    npm test       83 tests
+    npm test       142 tests
     npm run lint
 
     Sign in at /login as aditi@dev.local (admin), rohan@dev.local (mentor)
